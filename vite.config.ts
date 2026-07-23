@@ -1,12 +1,15 @@
 import vinext from "vinext";
 import { defineConfig } from "vite";
-import hostingConfig from "./.openai/hosting.json";
 import { sites } from "./build/sites-vite-plugin";
 
 const SITE_CREATOR_PLACEHOLDER_DATABASE_ID =
   "00000000-0000-4000-8000-000000000000";
 
-const { d1, r2 } = hostingConfig;
+// D1/R2 바인딩 (기존 .openai/hosting.json 대체).
+// db/index.ts·worker/index.ts 가 기대하는 D1 바인딩 이름은 "DB".
+// 실제 database_id 는 배포 환경에서 wrangler 가 주입한다.
+const d1: string | null = "DB";
+const r2: string | null = null;
 
 // macOS Seatbelt blocks FSEvents, so Codex previews need polling for HMR.
 const isCodexSeatbeltSandbox = process.env.CODEX_SANDBOX === "seatbelt";

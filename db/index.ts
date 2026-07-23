@@ -1,6 +1,9 @@
 import { env } from "cloudflare:workers";
-import { drizzle } from "drizzle-orm/d1";
+import { drizzle, type DrizzleD1Database } from "drizzle-orm/d1";
 import * as schema from "./schema";
+
+// 앱 전역에서 쓰는 DB 타입 (repository 함수 시그니처용)
+export type Database = DrizzleD1Database<typeof schema>;
 
 export function getDb() {
   if (!env.DB) {
