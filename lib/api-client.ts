@@ -1,6 +1,7 @@
 // 클라이언트용 타입드 API 래퍼 (docs/05 1단계 클라이언트)
 // 쿠키 세션을 쓰므로 same-origin fetch. 실패 시 에러 throw.
 import type {
+  Bookmark,
   Boundary,
   MapNote,
   Note,
@@ -8,6 +9,7 @@ import type {
 } from "@/db/schema";
 import type { BookmarkWithPlace } from "@/lib/repositories/bookmarks";
 import type { AutocompleteSuggestion, PlaceResult } from "@/lib/google-places";
+import type { GeocodeResult } from "@/lib/google-geocode";
 
 export type SessionUser = { id: string; email: string; displayName: string };
 
@@ -77,10 +79,12 @@ export const api = {
   bookmarks: {
     list: () => req<{ bookmarks: BookmarkWithPlace[] }>("/api/bookmarks").then((r) => r.bookmarks),
     create: (input: Record<string, unknown>) =>
-      req<{ bookmark: unknown; created: boolean }>("/api/bookmarks", { method: "POST", body: body(input) }),
+      req<{ bookmark: Bookmark; created: boolean }>("/api/bookmarks", { method: "POST", body: body(input) }),
     update: (id: string, patch: Record<string, unknown>) =>
       req<{ bookmark: unknown }>(`/api/bookmarks/${id}`, { method: "PATCH", body: body(patch) }),
     remove: (id: string) => req<{ ok: true }>(`/api/bookmarks/${id}`, { method: "DELETE" }),
+    setNote: (id: string, content: string) =>
+      req<{ note: Note }>(`/api/bookmarks/${id}/note`, { method: "PUT", body: body({ content }) }).then((r) => r.note),
   },
 
   // 메모
@@ -112,5 +116,9 @@ export const api = {
       req<{ suggestions: AutocompleteSuggestion[] }>(
         `/api/places/autocomplete?q=${encodeURIComponent(q)}${sessionToken ? `&sessionToken=${sessionToken}` : ""}`,
       ).then((r) => r.suggestions),
+    geocode: (address: string) =>
+      req<{ result: GeocodeResult | null }>(
+        `/api/places/geocode?address=${encodeURIComponent(address)}`,
+      ).then((r) => r.result),
   },
 };

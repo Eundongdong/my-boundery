@@ -1,6 +1,6 @@
 // 메모 repository — 장소별 다중 주제 메모 (docs/02, docs/08, D6/D15)
 // 원문 보존: originalContent 는 사용자 원문, aiOrganizedContent 는 AI 정리(별도)
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, isNull } from "drizzle-orm";
 import type { Database } from "@/db";
 import { notes, type Note } from "@/db/schema";
 
@@ -61,6 +61,42 @@ export async function updateNote(
     .update(notes)
     .set(patch)
     .where(and(eq(notes.id, id), eq(notes.userId, userId)))
+    .returning();
+  return row;
+}
+
+/**
+ * 대표 메모(topic=null, author=user) upsert — 장소당 단일 메모 UI 용 (docs/08 MVP).
+ * 원문 보존: 사용자 원문만 갱신하며 AI 정리 필드는 건드리지 않는다.
+ */
+export async function upsertRepresentativeNote(
+  db: Database,
+  userId: string,
+  bookmarkId: string,
+  content: string,
+): Promise<Note> {
+  const [existing] = await db
+    .select()
+    .from(notes)
+    .where(
+      and(
+        eq(notes.userId, userId),
+        eq(notes.bookmarkId, bookmarkId),
+        isNull(notes.topic),
+        eq(notes.author, "user"),
+      ),
+    );
+  if (existing) {
+    const [row] = await db
+      .update(notes)
+      .set({ originalContent: content })
+      .where(eq(notes.id, existing.id))
+      .returning();
+    return row;
+  }
+  const [row] = await db
+    .insert(notes)
+    .values({ userId, bookmarkId, originalContent: content, author: "user" })
     .returning();
   return row;
 }

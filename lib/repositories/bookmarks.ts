@@ -1,8 +1,9 @@
 // 북마크 repository — 사용자-장소 저장 관계 (docs/02, D14)
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull } from "drizzle-orm";
 import type { Database } from "@/db";
 import {
   bookmarks,
+  notes,
   places,
   themes,
   type Bookmark,
@@ -13,6 +14,8 @@ import {
 export type BookmarkWithPlace = Bookmark & {
   place: Place;
   theme: Theme | null;
+  // 대표 메모(topic=null) 원문. 목록 화면의 단일 메모 표시용 (docs/08)
+  representativeNote: string;
 };
 
 export type BookmarkInput = {
@@ -38,7 +41,26 @@ export async function listBookmarks(
     .leftJoin(themes, eq(bookmarks.themeId, themes.id))
     .where(eq(bookmarks.userId, userId))
     .orderBy(desc(bookmarks.createdAt));
-  return rows.map((r) => ({ ...r.bookmark, place: r.place, theme: r.theme }));
+
+  // 대표 메모(topic=null)를 한 번의 쿼리로 모아 붙인다 (N+1 회피)
+  const bookmarkIds = rows.map((r) => r.bookmark.id);
+  const repNotes = bookmarkIds.length
+    ? await db
+        .select({ bookmarkId: notes.bookmarkId, content: notes.originalContent })
+        .from(notes)
+        .where(and(inArray(notes.bookmarkId, bookmarkIds), isNull(notes.topic)))
+    : [];
+  const noteByBookmark = new Map<string, string>();
+  for (const n of repNotes) {
+    if (!noteByBookmark.has(n.bookmarkId)) noteByBookmark.set(n.bookmarkId, n.content);
+  }
+
+  return rows.map((r) => ({
+    ...r.bookmark,
+    place: r.place,
+    theme: r.theme,
+    representativeNote: noteByBookmark.get(r.bookmark.id) ?? "",
+  }));
 }
 
 export async function findBookmarkByPlace(
