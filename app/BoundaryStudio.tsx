@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { api } from "@/lib/api-client";
+import { useSession } from "@/lib/useSession";
 
 type MapProviderId = "openfreemap-positron" | "openfreemap-bright";
 
@@ -487,6 +489,21 @@ export function BoundaryStudio() {
   const mapEngineRef = useRef<RuntimeMapEngine | null>(null);
   const [mapReady, setMapReady] = useState(false);
 
+  // 로그인 세션 (미로그인 = 데모 모드, docs/10 / 결정 B안)
+  const { user, loading: sessionLoading } = useSession();
+  const [signingOut, setSigningOut] = useState(false);
+
+  async function handleSignOut() {
+    setSigningOut(true);
+    try {
+      await api.signout();
+      window.location.reload();
+    } catch {
+      setSigningOut(false);
+      setToast("로그아웃에 실패했어요");
+    }
+  }
+
   const activeBoundary =
     boundaries.find((boundary) => boundary.id === activeBoundaryId) ?? boundaries[0];
 
@@ -801,11 +818,34 @@ export function BoundaryStudio() {
           모든 변경사항 저장됨
         </div>
         <div className="topbar-actions">
-          <span className="prototype-badge">프로토타입 · 샘플 장소</span>
-          <button className="quiet-button" onClick={resetData} type="button">
-            {resetArmed ? "한 번 더 눌러 초기화" : "샘플 초기화"}
-          </button>
-          <span className="avatar" aria-label="내 프로필">나</span>
+          {sessionLoading ? null : user ? (
+            <>
+              <button className="quiet-button" onClick={resetData} type="button">
+                {resetArmed ? "한 번 더 눌러 초기화" : "샘플 초기화"}
+              </button>
+              <button
+                className="quiet-button"
+                onClick={handleSignOut}
+                disabled={signingOut}
+                type="button"
+              >
+                로그아웃
+              </button>
+              <span className="avatar" aria-label={`${user.displayName} 프로필`} title={user.email}>
+                {user.displayName.trim().charAt(0) || "나"}
+              </span>
+            </>
+          ) : (
+            <>
+              <span className="prototype-badge">데모 모드 · 샘플 장소</span>
+              <button className="quiet-button" onClick={resetData} type="button">
+                {resetArmed ? "한 번 더 눌러 초기화" : "샘플 초기화"}
+              </button>
+              <a className="login-button" href="/api/auth/google">
+                Google로 로그인
+              </a>
+            </>
+          )}
         </div>
       </header>
 
