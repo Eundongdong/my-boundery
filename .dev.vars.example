@@ -12,5 +12,6 @@ APP_URL=http://localhost:5173
 GOOGLE_OAUTH_CLIENT_ID=
 GOOGLE_OAUTH_CLIENT_SECRET=
 
-# Google Maps (Places 검색 + Geocoding) — 서버 전용 키
-GOOGLE_MAPS_API_KEY=
+# Kakao Local (주소 지오코딩 + 장소 검색) — 서버 전용 REST 키 (무료, 카드 불필요)
+# Kakao Developers > 내 애플리케이션 > 앱 키 > REST API 키
+KAKAO_REST_API_KEY=

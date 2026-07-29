@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { api } from "@/lib/api-client";
+import { api, ApiError, type PlaceResult } from "@/lib/api-client";
 import { useSession } from "@/lib/useSession";
 import { loadRemoteState, remote } from "@/lib/store/remote";
 import type {
@@ -461,6 +461,12 @@ export function BoundaryStudio() {
   const [boundaryAddress, setBoundaryAddress] = useState("");
   const [boundaryRadiusKm, setBoundaryRadiusKm] = useState(1);
   const [creatingBoundary, setCreatingBoundary] = useState(false);
+  // 장소 검색(Kakao) — 직접 추가
+  const [showPlaceSearch, setShowPlaceSearch] = useState(false);
+  const [placeQuery, setPlaceQuery] = useState("");
+  const [placeResults, setPlaceResults] = useState<PlaceResult[]>([]);
+  const [searchingPlaces, setSearchingPlaces] = useState(false);
+  const [placeSearchError, setPlaceSearchError] = useState("");
   const [mapProvider, setMapProvider] = useState<MapProviderId>("openfreemap-positron");
   const [mapLoading, setMapLoading] = useState(true);
   const [mapError, setMapError] = useState("");
@@ -753,8 +759,9 @@ export function BoundaryStudio() {
       setBoundaryAddress("");
       setBoundaryRadiusKm(1);
       setToast(`‘${name}’ 바운더리를 만들었어요`);
-    } catch {
-      setToast("바운더리 생성에 실패했어요");
+    } catch (e) {
+      // 서버가 준 실제 사유를 노출 (예: Kakao 키 문제)
+      setToast(e instanceof ApiError ? e.message : "바운더리 생성에 실패했어요");
     } finally {
       setCreatingBoundary(false);
     }
@@ -770,6 +777,70 @@ export function BoundaryStudio() {
       setToast("바운더리를 삭제했어요");
     } catch {
       setToast("삭제에 실패했어요");
+    }
+  }
+
+  // 장소 검색(Kakao) — 활성 바운더리 중심으로 편향
+  async function runPlaceSearch() {
+    const query = placeQuery.trim();
+    if (!query) return;
+    if (!user) {
+      setToast("로그인하면 장소를 검색해 추가할 수 있어요");
+      return;
+    }
+    setSearchingPlaces(true);
+    setPlaceSearchError("");
+    try {
+      const bias = activeBoundary.id
+        ? {
+            latitude: activeBoundary.center[0],
+            longitude: activeBoundary.center[1],
+            radiusM: activeBoundary.radius,
+          }
+        : undefined;
+      const results = await api.places.search(query, bias);
+      setPlaceResults(results);
+      if (!results.length) setPlaceSearchError("검색 결과가 없어요. 다른 키워드로 시도해보세요.");
+    } catch (e) {
+      setPlaceSearchError(e instanceof ApiError ? e.message : "장소 검색에 실패했어요");
+      setPlaceResults([]);
+    } finally {
+      setSearchingPlaces(false);
+    }
+  }
+
+  // 검색 결과를 내 지도에 추가 (로그인 모드: 서버 저장)
+  async function addSearchResult(result: PlaceResult) {
+    if (places.some((place) => place.googlePlaceId === result.externalPlaceId)) {
+      setToast("이미 저장한 장소예요");
+      return;
+    }
+    const newPlace: Place = {
+      id: `kakao-${result.externalPlaceId}`,
+      name: result.name,
+      coordinates: [result.latitude, result.longitude],
+      area: result.address ?? result.category,
+      themeId: activeThemeIds[0] ?? themes[0]?.id ?? "",
+      tags: [],
+      reason: "",
+      status: "saved",
+      rating: 0,
+      note: "",
+      googlePlaceId: result.externalPlaceId,
+    };
+    try {
+      if (user) {
+        const id = await remote.addPlace(newPlace, activeBoundary.id || null);
+        newPlace.id = id;
+      }
+      setPlaces((current) => [...current, newPlace]);
+      setSelectedPlaceId(newPlace.id);
+      setShowPlaceSearch(false);
+      setPlaceQuery("");
+      setPlaceResults([]);
+      setToast(`‘${result.name}’ 을 추가했어요`);
+    } catch (e) {
+      setToast(e instanceof ApiError ? e.message : "장소 추가에 실패했어요");
     }
   }
 
@@ -1359,8 +1430,63 @@ export function BoundaryStudio() {
                       <small>{activeBoundary.name} · {activeBoundary.area}</small>
                       <h1>내가 모은 장소</h1>
                     </div>
-                    <button aria-label="장소 직접 추가" className="add-place-button" type="button">+</button>
+                    <button
+                      aria-label="장소 검색해 추가"
+                      className="add-place-button"
+                      onClick={() => {
+                        if (!user) {
+                          setToast("로그인하면 장소를 검색해 추가할 수 있어요");
+                          return;
+                        }
+                        setShowPlaceSearch((current) => !current);
+                      }}
+                      type="button"
+                    >
+                      +
+                    </button>
                   </div>
+
+                  {showPlaceSearch && user && (
+                    <section className="place-search">
+                      <form
+                        className="place-search-bar"
+                        onSubmit={(event) => {
+                          event.preventDefault();
+                          void runPlaceSearch();
+                        }}
+                      >
+                        <input
+                          aria-label="장소 검색"
+                          autoFocus
+                          onChange={(event) => setPlaceQuery(event.target.value)}
+                          placeholder="장소 이름·키워드 (예: 성수 도자기 공방)"
+                          value={placeQuery}
+                        />
+                        <button className="primary-action" disabled={searchingPlaces} type="submit">
+                          {searchingPlaces ? "검색 중…" : "검색"}
+                        </button>
+                      </form>
+                      {placeSearchError && <p className="place-search-error">{placeSearchError}</p>}
+                      <div className="place-search-results">
+                        {placeResults.map((result) => (
+                          <div className="search-result" key={result.externalPlaceId}>
+                            <div className="search-result-copy">
+                              <strong>{result.name}</strong>
+                              <small>{result.category} · {result.address ?? "주소 미상"}</small>
+                            </div>
+                            <button
+                              className="search-result-add"
+                              onClick={() => void addSearchResult(result)}
+                              type="button"
+                            >
+                              추가
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </section>
+                  )}
+
                   <div className="list-subhead">
                     <span>거리순</span>
                     <span>{visiblePlaces.length}개의 장소</span>

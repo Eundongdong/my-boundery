@@ -381,6 +381,81 @@ textarea {
   text-align: left;
 }
 
+.place-search {
+  margin: 10px 0;
+  padding: 12px;
+  border: 1px solid #e2e6df;
+  border-radius: 12px;
+  background: #f7f8f4;
+}
+
+.place-search-bar {
+  display: flex;
+  gap: 7px;
+}
+
+.place-search-bar input {
+  flex: 1;
+  padding: 9px 10px;
+  border: 1px solid #dbe0d8;
+  border-radius: 8px;
+  background: #fff;
+  font-size: 12px;
+}
+
+.place-search-error {
+  margin-top: 8px;
+  color: #b4573f;
+  font-size: 12px;
+}
+
+.place-search-results {
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.search-result {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid #e6e9e2;
+  border-radius: 9px;
+  background: #fff;
+}
+
+.search-result-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.search-result-copy small {
+  color: var(--muted);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.search-result-add {
+  flex-shrink: 0;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: var(--sage-dark);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.search-result-add:hover {
+  filter: brightness(1.06);
+}
+
 .boundary-icon {
   display: grid;
   width: 30px;
