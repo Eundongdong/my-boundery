@@ -1,0 +1,16 @@
+// 로컬 D1 마이그레이션 적용용 설정 (CLI 전용, 시크릿 없음)
+// dev 서버(@cloudflare/vite-plugin)가 쓰는 로컬 D1 과 같은 DB 를 가리키도록
+// database_name 을 vite.config.ts 의 바인딩(site-creator-d1)과 일치시킨다.
+//
+// 사용: pnpm db:migrate:local
+{
+  "name": "my-boundary",
+  "compatibility_date": "2025-01-01",
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "site-creator-d1",
+      "database_id": "00000000-0000-4000-8000-000000000000"
+    }
+  ]
+}

@@ -11,7 +11,11 @@
     "start": "WRANGLER_LOG_PATH=.wrangler/wrangler.log vinext start",
     "test": "npm run build && node --test tests/rendered-html.test.mjs",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
-    "db:generate": "drizzle-kit generate"
+    "db:generate": "drizzle-kit generate",
+    "db:migrate:local": "wrangler d1 execute DB --local --config wrangler.d1.jsonc --file ./drizzle/0000_unusual_boomerang.sql"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": ["workerd", "esbuild", "sharp", "unrs-resolver"]
   },
   "dependencies": {
     "drizzle-orm": "0.45.2",

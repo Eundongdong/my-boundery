@@ -1,0 +1,16 @@
+# 로컬 개발용 환경변수 템플릿.
+# 이 파일을 복사해 `.dev.vars` 로 만들고 값을 채우세요.
+# `.dev.vars` 는 시크릿이므로 커밋되지 않습니다 (.gitignore 에 포함).
+
+# 세션 서명용 — 아무 긴 랜덤 문자열
+AUTH_SECRET=
+
+# 개발 서버 주소 (dev 서버가 뜬 포트와 일치해야 함)
+APP_URL=http://localhost:5173
+
+# Google OAuth (사용자 인증) — Google Cloud > 사용자 인증 정보
+GOOGLE_OAUTH_CLIENT_ID=
+GOOGLE_OAUTH_CLIENT_SECRET=
+
+# Google Maps (Places 검색 + Geocoding) — 서버 전용 키
+GOOGLE_MAPS_API_KEY=
