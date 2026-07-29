@@ -3,45 +3,15 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "@/lib/api-client";
 import { useSession } from "@/lib/useSession";
-
-type MapProviderId = "openfreemap-positron" | "openfreemap-bright";
-
-type Boundary = {
-  id: "home" | "work";
-  name: string;
-  area: string;
-  center: [number, number];
-  radius: number;
-  color: string;
-  icon: string;
-};
-
-type Theme = {
-  id: string;
-  name: string;
-  icon: string;
-  color: string;
-};
-
-type Place = {
-  id: string;
-  name: string;
-  coordinates: [number, number];
-  area: string;
-  themeId: string;
-  tags: string[];
-  reason: string;
-  status: "saved" | "planned" | "visited";
-  rating: number;
-  note: string;
-};
-
-type MapNote = {
-  title: string;
-  body: string;
-  callout: string;
-  checklist: { id: string; text: string; done: boolean }[];
-};
+import { loadRemoteState, remote } from "@/lib/store/remote";
+import type {
+  Boundary,
+  MapNote,
+  MapProviderId,
+  PersistedState,
+  Place,
+  Theme,
+} from "@/lib/store/types";
 
 type AiCandidate = Place & { selected: boolean };
 
@@ -49,14 +19,6 @@ type AiSuggestionSession = {
   query: string;
   summary: string;
   candidates: AiCandidate[];
-};
-
-type PersistedState = {
-  boundaries: Boundary[];
-  themes: Theme[];
-  places: Place[];
-  mapNote: MapNote;
-  mapProvider?: MapProviderId;
 };
 
 type MappedPlace = Place & { distance: number };
@@ -77,6 +39,17 @@ type RuntimeMapEngine = {
 };
 
 const STORAGE_KEY = "my-boundary-studio-v1";
+
+// 바운더리가 하나도 없을 때(로그인 직후 온보딩 전)의 안전 폴백 — 렌더 크래시 방지
+const FALLBACK_BOUNDARY: Boundary = {
+  id: "",
+  name: "",
+  area: "",
+  center: [37.5665, 126.978],
+  radius: 1000,
+  color: "#587462",
+  icon: "⌖",
+};
 
 const MAP_PROVIDERS: { id: MapProviderId; vendor: string; name: string; tone: string }[] = [
   { id: "openfreemap-positron", vendor: "OpenFreeMap", name: "Positron", tone: "#dce1df" },
@@ -197,7 +170,7 @@ const DEFAULT_MAP_NOTE: MapNote = {
   ],
 };
 
-const AI_POOLS: Record<"home" | "work", Place[]> = {
+const AI_POOLS: Record<string, Place[]> = {
   home: [
     {
       id: "ai-moss-coffee",
@@ -482,6 +455,12 @@ export function BoundaryStudio() {
   const [showThemeCreator, setShowThemeCreator] = useState(false);
   const [newThemeName, setNewThemeName] = useState("");
   const [resetArmed, setResetArmed] = useState(false);
+  // 바운더리 생성 폼 (로그인 전용: 주소 지오코딩 필요)
+  const [showBoundaryForm, setShowBoundaryForm] = useState(false);
+  const [boundaryName, setBoundaryName] = useState("");
+  const [boundaryAddress, setBoundaryAddress] = useState("");
+  const [boundaryRadiusKm, setBoundaryRadiusKm] = useState(1);
+  const [creatingBoundary, setCreatingBoundary] = useState(false);
   const [mapProvider, setMapProvider] = useState<MapProviderId>("openfreemap-positron");
   const [mapLoading, setMapLoading] = useState(true);
   const [mapError, setMapError] = useState("");
@@ -492,6 +471,7 @@ export function BoundaryStudio() {
   // 로그인 세션 (미로그인 = 데모 모드, docs/10 / 결정 B안)
   const { user, loading: sessionLoading } = useSession();
   const [signingOut, setSigningOut] = useState(false);
+  const mapNoteSaveTimer = useRef<number | null>(null);
 
   async function handleSignOut() {
     setSigningOut(true);
@@ -505,7 +485,9 @@ export function BoundaryStudio() {
   }
 
   const activeBoundary =
-    boundaries.find((boundary) => boundary.id === activeBoundaryId) ?? boundaries[0];
+    boundaries.find((boundary) => boundary.id === activeBoundaryId) ??
+    boundaries[0] ??
+    FALLBACK_BOUNDARY;
 
   const themeById = useMemo(
     () => new Map(themes.map((theme) => [theme.id, theme])),
@@ -537,34 +519,76 @@ export function BoundaryStudio() {
 
   const selectedPlace = placesWithDistance.find((place) => place.id === selectedPlaceId);
 
+  // 세션이 정해지면 하이드레이션: 로그인=API, 미로그인=localStorage 데모 (결정 B안)
   useEffect(() => {
-    try {
-      const saved = window.localStorage.getItem(STORAGE_KEY);
-      if (saved) {
-        const parsed = JSON.parse(saved) as PersistedState;
-        // Storage hydration intentionally synchronizes the external browser store once on mount.
-        // eslint-disable-next-line react-hooks/set-state-in-effect
-        setBoundaries(parsed.boundaries);
-        setThemes(parsed.themes);
-        setPlaces(parsed.places);
-        setMapNote(parsed.mapNote);
-        if (parsed.mapProvider && MAP_PROVIDERS.some((provider) => provider.id === parsed.mapProvider)) {
-          setMapProvider(parsed.mapProvider);
-        }
-        setActiveThemeIds(parsed.themes.map((theme) => theme.id));
-      }
-    } catch {
-      window.localStorage.removeItem(STORAGE_KEY);
-    } finally {
-      setHydrated(true);
-    }
-  }, []);
+    if (sessionLoading) return;
+    let active = true;
 
+    async function hydrateRemote() {
+      try {
+        const state = await loadRemoteState();
+        if (!active) return;
+        setBoundaries(state.boundaries);
+        setThemes(state.themes);
+        setPlaces(state.places);
+        setMapNote(state.mapNote);
+        setActiveThemeIds(state.themes.map((theme) => theme.id));
+        setActiveBoundaryId(state.boundaries[0]?.id ?? "");
+        setSelectedPlaceId(state.places[0]?.id ?? null);
+      } catch {
+        if (active) setToast("내 데이터를 불러오지 못했어요");
+      } finally {
+        if (active) setHydrated(true);
+      }
+    }
+
+    function hydrateLocal() {
+      try {
+        const saved = window.localStorage.getItem(STORAGE_KEY);
+        if (saved) {
+          const parsed = JSON.parse(saved) as PersistedState;
+          setBoundaries(parsed.boundaries);
+          setThemes(parsed.themes);
+          setPlaces(parsed.places);
+          setMapNote(parsed.mapNote);
+          if (parsed.mapProvider && MAP_PROVIDERS.some((p) => p.id === parsed.mapProvider)) {
+            setMapProvider(parsed.mapProvider);
+          }
+          setActiveThemeIds(parsed.themes.map((theme) => theme.id));
+        }
+      } catch {
+        window.localStorage.removeItem(STORAGE_KEY);
+      } finally {
+        setHydrated(true);
+      }
+    }
+
+    if (user) void hydrateRemote();
+    else hydrateLocal();
+
+    return () => {
+      active = false;
+    };
+  }, [sessionLoading, user]);
+
+  // 데모 모드에서만 localStorage 로 저장. 로그인 모드는 각 뮤테이션이 API 로 write-through.
   useEffect(() => {
-    if (!hydrated) return;
+    if (!hydrated || user) return;
     const state: PersistedState = { boundaries, themes, places, mapNote, mapProvider };
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-  }, [boundaries, hydrated, mapNote, mapProvider, places, themes]);
+  }, [boundaries, hydrated, user, mapNote, mapProvider, places, themes]);
+
+  // 로그인 모드: 지도 노트는 디바운스 저장(입력마다 호출 방지)
+  useEffect(() => {
+    if (!hydrated || !user) return;
+    if (mapNoteSaveTimer.current) window.clearTimeout(mapNoteSaveTimer.current);
+    mapNoteSaveTimer.current = window.setTimeout(() => {
+      remote.saveMapNote(mapNote).catch(() => undefined);
+    }, 800);
+    return () => {
+      if (mapNoteSaveTimer.current) window.clearTimeout(mapNoteSaveTimer.current);
+    };
+  }, [mapNote, hydrated, user]);
 
   useEffect(() => {
     if (!toast) return;
@@ -659,6 +683,15 @@ export function BoundaryStudio() {
     );
   }
 
+  // 슬라이더를 놓을 때만 서버에 반영(로그인 모드) — onChange 마다 호출 방지
+  function persistRadius() {
+    if (user && activeBoundary.id) {
+      remote
+        .updateBoundary(activeBoundary.id, { radius: activeBoundary.radius })
+        .catch(() => setToast("반경 저장에 실패했어요"));
+    }
+  }
+
   function toggleTheme(themeId: string) {
     setActiveThemeIds((current) =>
       current.includes(themeId)
@@ -667,20 +700,77 @@ export function BoundaryStudio() {
     );
   }
 
-  function addTheme() {
+  async function addTheme() {
     const name = newThemeName.trim();
     if (!name) return;
-    const nextTheme: Theme = {
-      id: `custom-${Date.now()}`,
-      name,
-      icon: "✦",
-      color: "#7c657e",
-    };
+    let nextTheme: Theme = { id: `custom-${Date.now()}`, name, icon: "✦", color: "#7c657e" };
+    if (user) {
+      try {
+        nextTheme = await remote.createTheme({ name, icon: "✦", color: "#7c657e" });
+      } catch {
+        setToast("테마 저장에 실패했어요");
+        return;
+      }
+    }
     setThemes((current) => [...current, nextTheme]);
     setActiveThemeIds((current) => [...current, nextTheme.id]);
     setNewThemeName("");
     setShowThemeCreator(false);
     setToast(`‘${name}’ 테마를 만들었어요`);
+  }
+
+  // 바운더리 추가: 주소를 지오코딩해서 생성 (로그인 전용)
+  async function createBoundaryFromForm() {
+    if (!user) {
+      setToast("로그인하면 바운더리를 추가할 수 있어요");
+      return;
+    }
+    const name = boundaryName.trim();
+    const address = boundaryAddress.trim();
+    if (!name || !address) {
+      setToast("이름과 주소를 입력해주세요");
+      return;
+    }
+    setCreatingBoundary(true);
+    try {
+      const geo = await api.places.geocode(address);
+      if (!geo) {
+        setToast("주소를 찾지 못했어요");
+        return;
+      }
+      const created = await remote.createBoundary({
+        name,
+        area: geo.address,
+        center: [geo.latitude, geo.longitude],
+        radius: Math.round(boundaryRadiusKm * 1000),
+        color: "#587462",
+        icon: "⌖",
+      });
+      setBoundaries((current) => [...current, created]);
+      setActiveBoundaryId(created.id);
+      setShowBoundaryForm(false);
+      setBoundaryName("");
+      setBoundaryAddress("");
+      setBoundaryRadiusKm(1);
+      setToast(`‘${name}’ 바운더리를 만들었어요`);
+    } catch {
+      setToast("바운더리 생성에 실패했어요");
+    } finally {
+      setCreatingBoundary(false);
+    }
+  }
+
+  async function removeBoundary(id: string) {
+    if (!user) return;
+    const rest = boundaries.filter((boundary) => boundary.id !== id);
+    try {
+      await remote.deleteBoundary(id);
+      setBoundaries(rest);
+      if (activeBoundaryId === id) setActiveBoundaryId(rest[0]?.id ?? "");
+      setToast("바운더리를 삭제했어요");
+    } catch {
+      setToast("삭제에 실패했어요");
+    }
   }
 
   function focusPlace(placeId: string) {
@@ -700,7 +790,7 @@ export function BoundaryStudio() {
       setAiSession(null);
       return;
     }
-    const requestedBoundaryId: Boundary["id"] = /직장|회사/.test(query)
+    const requestedBoundaryId: string = /직장|회사/.test(query)
       ? "work"
       : /집/.test(query)
         ? "home"
@@ -712,7 +802,7 @@ export function BoundaryStudio() {
         : /운동/.test(query)
           ? "exercise"
           : "lunch";
-    const availablePool = AI_POOLS[requestedBoundaryId].filter(
+    const availablePool = (AI_POOLS[requestedBoundaryId] ?? []).filter(
       (candidate) => candidate.themeId === requestedThemeId,
     );
     if (!availablePool.length) {
@@ -757,7 +847,7 @@ export function BoundaryStudio() {
     );
   }
 
-  function commitSuggestions(addAll = false) {
+  async function commitSuggestions(addAll = false) {
     if (!aiSession) return;
     const chosen = aiSession.candidates.filter((candidate) => addAll || candidate.selected);
     const existingNames = new Set(places.map((place) => place.name));
@@ -771,19 +861,38 @@ export function BoundaryStudio() {
       setToast("이미 저장된 장소이거나 선택한 후보가 없어요");
       return;
     }
-    setPlaces((current) => [...current, ...additions]);
-    setSelectedPlaceId(additions[additions.length - 1].id);
+    let toAdd = additions;
+    if (user) {
+      // 로그인 모드: 서버에 저장하고 서버가 발급한 id(=bookmark.id)로 교체
+      try {
+        toAdd = await Promise.all(
+          additions.map(async (place) => {
+            const id = await remote.addPlace(place, activeBoundary.id || null);
+            return { ...place, id };
+          }),
+        );
+      } catch {
+        setToast("장소 저장에 실패했어요");
+        return;
+      }
+    }
+    setPlaces((current) => [...current, ...toAdd]);
+    setSelectedPlaceId(toAdd[toAdd.length - 1].id);
     setAiSession(null);
-    setToast(`${additions.length}곳을 내 지도에 추가했어요`);
+    setToast(`${toAdd.length}곳을 내 지도에 추가했어요`);
   }
 
   function updatePlace(placeId: string, patch: Partial<Place>) {
     setPlaces((current) =>
       current.map((place) => (place.id === placeId ? { ...place, ...patch } : place)),
     );
+    if (user) {
+      remote.updatePlace(placeId, patch).catch(() => setToast("저장에 실패했어요"));
+    }
   }
 
   function resetData() {
+    if (user) return; // 샘플 초기화는 데모 모드 전용
     if (!resetArmed) {
       setResetArmed(true);
       window.setTimeout(() => setResetArmed(false), 3500);
@@ -805,6 +914,73 @@ export function BoundaryStudio() {
 
   const selectedCount = aiSession?.candidates.filter((candidate) => candidate.selected).length ?? 0;
   const activeMapProvider = MAP_PROVIDERS.find((provider) => provider.id === mapProvider) ?? MAP_PROVIDERS[0];
+  // 로그인했는데 바운더리가 하나도 없으면 온보딩
+  const needsOnboarding = !sessionLoading && !!user && hydrated && boundaries.length === 0;
+
+  const boundaryForm = (
+    <form
+      className="boundary-form"
+      onSubmit={(event) => {
+        event.preventDefault();
+        void createBoundaryFromForm();
+      }}
+    >
+      <input
+        aria-label="바운더리 이름"
+        onChange={(event) => setBoundaryName(event.target.value)}
+        placeholder="이름 (예: 집, 직장)"
+        value={boundaryName}
+      />
+      <input
+        aria-label="기준 주소"
+        onChange={(event) => setBoundaryAddress(event.target.value)}
+        placeholder="기준 주소 (예: 서울 성동구 성수동)"
+        value={boundaryAddress}
+      />
+      <label className="boundary-form-radius">
+        반경
+        <select
+          onChange={(event) => setBoundaryRadiusKm(Number(event.target.value))}
+          value={boundaryRadiusKm}
+        >
+          <option value={0.5}>500m</option>
+          <option value={1}>1km</option>
+          <option value={1.5}>1.5km</option>
+          <option value={2}>2km</option>
+        </select>
+      </label>
+      <button className="primary-action" disabled={creatingBoundary} type="submit">
+        {creatingBoundary ? "만드는 중…" : "바운더리 만들기"}
+      </button>
+    </form>
+  );
+
+  if (needsOnboarding) {
+    return (
+      <div className="studio-shell">
+        <header className="topbar">
+          <div className="brand">
+            <span className="brand-mark">⌖</span>
+            <span>내 바운더리</span>
+          </div>
+          <div className="topbar-actions">
+            <button className="quiet-button" onClick={handleSignOut} disabled={signingOut} type="button">
+              로그아웃
+            </button>
+          </div>
+        </header>
+        <div className="onboarding">
+          <div className="onboarding-card">
+            <span className="onboarding-mark">⌖</span>
+            <h1>첫 바운더리를 만들어요</h1>
+            <p>집·직장 등 자주 다니는 곳의 주소와 반경을 정하면, 그 안의 장소를 모을 수 있어요.</p>
+            {boundaryForm}
+          </div>
+        </div>
+        {toast && <div className="toast" role="status"><span>✓</span>{toast}</div>}
+      </div>
+    );
+  }
 
   return (
     <div className="studio-shell">
@@ -820,9 +996,6 @@ export function BoundaryStudio() {
         <div className="topbar-actions">
           {sessionLoading ? null : user ? (
             <>
-              <button className="quiet-button" onClick={resetData} type="button">
-                {resetArmed ? "한 번 더 눌러 초기화" : "샘플 초기화"}
-              </button>
               <button
                 className="quiet-button"
                 onClick={handleSignOut}
@@ -870,29 +1043,54 @@ export function BoundaryStudio() {
           <section className="sidebar-section boundary-section">
             <div className="section-label-row">
               <p className="section-label">내 바운더리</p>
-              <button className="circle-button" aria-label="바운더리 추가" type="button">+</button>
+              <button
+                className="circle-button"
+                aria-label="바운더리 추가"
+                onClick={() => {
+                  if (!user) {
+                    setToast("로그인하면 바운더리를 추가할 수 있어요");
+                    return;
+                  }
+                  setShowBoundaryForm((current) => !current);
+                }}
+                type="button"
+              >
+                +
+              </button>
             </div>
             <div className="boundary-list">
               {boundaries.map((boundary) => (
-                <button
-                  className={`boundary-card ${boundary.id === activeBoundaryId ? "is-active" : ""}`}
-                  key={boundary.id}
-                  onClick={() => setActiveBoundaryId(boundary.id)}
-                  type="button"
-                >
-                  <span className="boundary-icon" style={{ background: `${boundary.color}18`, color: boundary.color }}>
-                    {boundary.icon}
-                  </span>
-                  <span className="boundary-copy">
-                    <strong>{boundary.name}</strong>
-                    <small>{boundary.area} · {boundary.radius >= 1000 ? `${boundary.radius / 1000}km` : `${boundary.radius}m`}</small>
-                  </span>
-                  <span className="boundary-count">
-                    {places.filter((place) => haversineMeters(boundary.center, place.coordinates) <= boundary.radius).length}
-                  </span>
-                </button>
+                <div className={`boundary-row ${boundary.id === activeBoundaryId ? "is-active" : ""}`} key={boundary.id}>
+                  <button
+                    className="boundary-card"
+                    onClick={() => setActiveBoundaryId(boundary.id)}
+                    type="button"
+                  >
+                    <span className="boundary-icon" style={{ background: `${boundary.color}18`, color: boundary.color }}>
+                      {boundary.icon}
+                    </span>
+                    <span className="boundary-copy">
+                      <strong>{boundary.name}</strong>
+                      <small>{boundary.area} · {boundary.radius >= 1000 ? `${boundary.radius / 1000}km` : `${boundary.radius}m`}</small>
+                    </span>
+                    <span className="boundary-count">
+                      {places.filter((place) => haversineMeters(boundary.center, place.coordinates) <= boundary.radius).length}
+                    </span>
+                  </button>
+                  {user && (
+                    <button
+                      className="boundary-delete"
+                      aria-label={`${boundary.name} 삭제`}
+                      onClick={() => void removeBoundary(boundary.id)}
+                      type="button"
+                    >
+                      ×
+                    </button>
+                  )}
+                </div>
               ))}
             </div>
+            {showBoundaryForm && user && boundaryForm}
             <div className="radius-control">
               <div>
                 <span>반경</span>
@@ -903,6 +1101,8 @@ export function BoundaryStudio() {
                 max="2000"
                 min="500"
                 onChange={(event) => updateRadius(Number(event.target.value))}
+                onPointerUp={persistRadius}
+                onKeyUp={persistRadius}
                 step="100"
                 type="range"
                 value={activeBoundary.radius}
