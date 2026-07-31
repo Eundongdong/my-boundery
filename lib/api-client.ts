@@ -9,6 +9,7 @@ import type {
 } from "@/db/schema";
 import type { BookmarkWithPlace } from "@/lib/repositories/bookmarks";
 import type { GeocodeResult, PlaceResult } from "@/lib/kakao";
+import type { PlaceCandidate } from "@/lib/ai";
 
 export type SessionUser = { id: string; email: string; displayName: string };
 
@@ -116,6 +117,28 @@ export const api = {
         `/api/places/geocode?address=${encodeURIComponent(address)}`,
       ).then((r) => r.result),
   },
+
+  // AI 추천 → 승인 → 되돌리기 (docs/06)
+  ai: {
+    recommend: (query: string, boundaryId?: string | null) =>
+      req<{
+        recommendationId: string;
+        summary: string | null;
+        rationale: string | null;
+        candidates: PlaceCandidate[];
+      }>("/api/ai/recommend", { method: "POST", body: body({ query, boundaryId }) }),
+    approve: (recommendationId: string, placeIds: string[], boundaryId?: string | null) =>
+      req<{ places: unknown[]; approvalHistoryId: string }>("/api/ai/approve", {
+        method: "POST",
+        body: body({ recommendationId, placeIds, boundaryId }),
+      }),
+    revert: (approvalHistoryId: string) =>
+      req<{ ok: true; removedBookmarkIds: string[] }>("/api/ai/revert", {
+        method: "POST",
+        body: body({ approvalHistoryId }),
+      }),
+  },
 };
 
 export type { PlaceResult, GeocodeResult } from "@/lib/kakao";
+export type { PlaceCandidate } from "@/lib/ai";

@@ -19,6 +19,7 @@ type AiSuggestionSession = {
   query: string;
   summary: string;
   candidates: AiCandidate[];
+  recommendationId?: string; // 로그인 실제 AI 추천이면 존재 (승인 API용)
 };
 
 type MappedPlace = Place & { distance: number };
@@ -478,6 +479,8 @@ export function BoundaryStudio() {
   const { user, loading: sessionLoading } = useSession();
   const [signingOut, setSigningOut] = useState(false);
   const mapNoteSaveTimer = useRef<number | null>(null);
+  // AI 승인 후 실행취소 (docs/06 §5)
+  const [undo, setUndo] = useState<{ approvalHistoryId: string; placeIds: string[] } | null>(null);
 
   async function handleSignOut() {
     setSigningOut(true);
@@ -598,9 +601,12 @@ export function BoundaryStudio() {
 
   useEffect(() => {
     if (!toast) return;
-    const timer = window.setTimeout(() => setToast(""), 2400);
+    const timer = window.setTimeout(() => {
+      setToast("");
+      setUndo(null);
+    }, undo ? 6000 : 2400);
     return () => window.clearTimeout(timer);
-  }, [toast]);
+  }, [toast, undo]);
 
   useEffect(() => {
     if (!mapHostRef.current) return;
@@ -853,7 +859,69 @@ export function BoundaryStudio() {
     mapEngineRef.current?.flyTo(place.coordinates, 17);
   }
 
+  // 로그인 모드: 실제 AI 추천 (Groq + Kakao, 승인 전 후보)
+  async function runAiRemote() {
+    const query = aiQuery.trim();
+    if (!query) {
+      setAiError("무엇을 찾을지 한 문장으로 적어주세요.");
+      return;
+    }
+    setAiLoading(true);
+    setAiError("");
+    setAiSession(null);
+    try {
+      const res = await api.ai.recommend(query, activeBoundary.id || null);
+      if (!res.candidates.length) {
+        setAiError("조건에 맞는 장소를 찾지 못했어요. 다른 키워드로 시도해보세요.");
+        return;
+      }
+      const candidates: AiCandidate[] = res.candidates.map((c) => ({
+        id: `kakao-${c.externalPlaceId}`,
+        name: c.name,
+        coordinates: [c.latitude, c.longitude],
+        area: c.address ?? c.category,
+        themeId: c.themeId ?? themes[0]?.id ?? "",
+        tags: [],
+        reason: c.reason,
+        status: "saved",
+        rating: 0,
+        note: "",
+        googlePlaceId: c.externalPlaceId,
+        selected: true,
+      }));
+      setAiSession({
+        query,
+        summary: res.summary ?? `${candidates.length}곳을 찾았어요`,
+        candidates,
+        recommendationId: res.recommendationId,
+      });
+      setActivePanel("places");
+      setMobileView("places");
+    } catch (e) {
+      setAiError(e instanceof ApiError ? e.message : "AI 요청에 실패했어요");
+    } finally {
+      setAiLoading(false);
+    }
+  }
+
+  async function doUndo() {
+    if (!undo) return;
+    const target = undo;
+    setUndo(null);
+    try {
+      await api.ai.revert(target.approvalHistoryId);
+      setPlaces((current) => current.filter((place) => !target.placeIds.includes(place.id)));
+      setToast("추가를 되돌렸어요");
+    } catch {
+      setToast("되돌리기에 실패했어요");
+    }
+  }
+
   function runAi() {
+    if (user) {
+      void runAiRemote();
+      return;
+    }
     const query = aiQuery.trim();
     const supported = /카페|커피|점심|맛집|식사|산책|운동|추가|찾아|추천/.test(query);
     if (!query || !supported) {
@@ -921,6 +989,35 @@ export function BoundaryStudio() {
   async function commitSuggestions(addAll = false) {
     if (!aiSession) return;
     const chosen = aiSession.candidates.filter((candidate) => addAll || candidate.selected);
+    if (!chosen.length) {
+      setToast("선택한 후보가 없어요");
+      return;
+    }
+
+    // 로그인 + 실제 AI 추천 → 승인 API (승인 이력·되돌리기, docs/06)
+    if (user && aiSession.recommendationId) {
+      const ids = chosen
+        .map((candidate) => candidate.googlePlaceId)
+        .filter((id): id is string => Boolean(id));
+      try {
+        const res = await api.ai.approve(aiSession.recommendationId, ids, activeBoundary.id || null);
+        const added = res.places as Place[];
+        setAiSession(null);
+        if (!added.length) {
+          setToast("이미 저장한 장소예요");
+          return;
+        }
+        setPlaces((current) => [...current, ...added]);
+        setSelectedPlaceId(added[added.length - 1].id);
+        setUndo({ approvalHistoryId: res.approvalHistoryId, placeIds: added.map((p) => p.id) });
+        setToast(`${added.length}곳을 내 지도에 추가했어요`);
+      } catch (e) {
+        setToast(e instanceof ApiError ? e.message : "추가에 실패했어요");
+      }
+      return;
+    }
+
+    // 데모(비로그인): 로컬 상태에만 추가
     const existingNames = new Set(places.map((place) => place.name));
     const additions = chosen
       .filter((candidate) => !existingNames.has(candidate.name))
@@ -932,25 +1029,10 @@ export function BoundaryStudio() {
       setToast("이미 저장된 장소이거나 선택한 후보가 없어요");
       return;
     }
-    let toAdd = additions;
-    if (user) {
-      // 로그인 모드: 서버에 저장하고 서버가 발급한 id(=bookmark.id)로 교체
-      try {
-        toAdd = await Promise.all(
-          additions.map(async (place) => {
-            const id = await remote.addPlace(place, activeBoundary.id || null);
-            return { ...place, id };
-          }),
-        );
-      } catch {
-        setToast("장소 저장에 실패했어요");
-        return;
-      }
-    }
-    setPlaces((current) => [...current, ...toAdd]);
-    setSelectedPlaceId(toAdd[toAdd.length - 1].id);
+    setPlaces((current) => [...current, ...additions]);
+    setSelectedPlaceId(additions[additions.length - 1].id);
     setAiSession(null);
-    setToast(`${toAdd.length}곳을 내 지도에 추가했어요`);
+    setToast(`${additions.length}곳을 내 지도에 추가했어요`);
   }
 
   function updatePlace(placeId: string, patch: Partial<Place>) {
@@ -1663,7 +1745,17 @@ export function BoundaryStudio() {
           )}
         </aside>
       </main>
-      {toast && <div className="toast" role="status"><span>✓</span>{toast}</div>}
+      {toast && (
+        <div className="toast" role="status">
+          <span>✓</span>
+          {toast}
+          {undo && (
+            <button className="toast-undo" onClick={doUndo} type="button">
+              실행취소
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }

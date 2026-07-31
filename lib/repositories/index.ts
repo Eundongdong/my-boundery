@@ -6,3 +6,5 @@ export * as placesRepo from "./places";
 export * as bookmarksRepo from "./bookmarks";
 export * as notesRepo from "./notes";
 export * as mapNotesRepo from "./mapNotes";
+export * as aiRecommendationsRepo from "./aiRecommendations";
+export * as approvalHistoryRepo from "./approvalHistory";
