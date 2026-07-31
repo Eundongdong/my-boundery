@@ -8,8 +8,7 @@ import type {
   Theme,
 } from "@/db/schema";
 import type { BookmarkWithPlace } from "@/lib/repositories/bookmarks";
-import type { AutocompleteSuggestion, PlaceResult } from "@/lib/google-places";
-import type { GeocodeResult } from "@/lib/google-geocode";
+import type { GeocodeResult, PlaceResult } from "@/lib/kakao";
 
 export type SessionUser = { id: string; email: string; displayName: string };
 
@@ -108,17 +107,15 @@ export const api = {
       req<{ mapNote: MapNote }>("/api/map-notes", { method: "PUT", body: body(input) }).then((r) => r.mapNote),
   },
 
-  // 장소 검색 (Google Places 프록시)
+  // 장소 검색 (Kakao Local 프록시)
   places: {
     search: (query: string, bias?: { latitude: number; longitude: number; radiusM: number }) =>
       req<{ results: PlaceResult[] }>("/api/places/search", { method: "POST", body: body({ query, bias }) }).then((r) => r.results),
-    autocomplete: (q: string, sessionToken?: string) =>
-      req<{ suggestions: AutocompleteSuggestion[] }>(
-        `/api/places/autocomplete?q=${encodeURIComponent(q)}${sessionToken ? `&sessionToken=${sessionToken}` : ""}`,
-      ).then((r) => r.suggestions),
     geocode: (address: string) =>
       req<{ result: GeocodeResult | null }>(
         `/api/places/geocode?address=${encodeURIComponent(address)}`,
       ).then((r) => r.result),
   },
 };
+
+export type { PlaceResult, GeocodeResult } from "@/lib/kakao";

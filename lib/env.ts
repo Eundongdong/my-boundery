@@ -6,9 +6,9 @@ import { env } from "cloudflare:workers";
 export type AppEnv = {
   DB: unknown; // D1Database (db/index.ts 에서 사용)
   AUTH_SECRET?: string; // 세션 서명
-  GOOGLE_OAUTH_CLIENT_ID?: string;
+  GOOGLE_OAUTH_CLIENT_ID?: string; // 로그인 전용
   GOOGLE_OAUTH_CLIENT_SECRET?: string;
-  GOOGLE_MAPS_API_KEY?: string; // Places (서버 전용)
+  KAKAO_REST_API_KEY?: string; // Kakao Local — 지오코딩·장소검색 (서버 전용, D7 개정)
   APP_URL?: string; // 예: https://my-boundary.example.com
 };
 
