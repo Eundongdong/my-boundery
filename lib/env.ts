@@ -9,6 +9,8 @@ export type AppEnv = {
   GOOGLE_OAUTH_CLIENT_ID?: string; // 로그인 전용
   GOOGLE_OAUTH_CLIENT_SECRET?: string;
   KAKAO_REST_API_KEY?: string; // Kakao Local — 지오코딩·장소검색 (서버 전용, D7 개정)
+  GROQ_API_KEY?: string; // Groq — AI 추천 (무료, D8 확정)
+  GROQ_MODEL?: string; // 기본: llama-3.3-70b-versatile
   APP_URL?: string; // 예: https://my-boundary.example.com
 };
 

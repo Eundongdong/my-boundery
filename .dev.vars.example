@@ -15,3 +15,8 @@ GOOGLE_OAUTH_CLIENT_SECRET=
 # Kakao Local (주소 지오코딩 + 장소 검색) — 서버 전용 REST 키 (무료, 카드 불필요)
 # Kakao Developers > 내 애플리케이션 > 앱 키 > REST API 키
 KAKAO_REST_API_KEY=
+
+# Groq (AI 추천) — 무료 티어, 카드 불필요. console.groq.com > API Keys
+GROQ_API_KEY=
+# (선택) 모델 override. 기본: llama-3.3-70b-versatile
+# GROQ_MODEL=llama-3.3-70b-versatile

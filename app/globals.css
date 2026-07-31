@@ -2015,6 +2015,21 @@ textarea {
   font-size: 10px;
 }
 
+.toast-undo {
+  margin-left: 6px;
+  padding: 4px 9px;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  border-radius: 999px;
+  background: transparent;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.toast-undo:hover {
+  background: rgba(255, 255, 255, 0.15);
+}
+
 @keyframes toast-in {
   from { opacity: 0; transform: translateY(10px); }
   to { opacity: 1; transform: translateY(0); }
